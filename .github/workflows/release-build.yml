@@ -8,6 +8,7 @@
 # - Release tag must follow format: v{major}.{minor}.{patch} (e.g., v1.0.2)
 # - Repository must have GitHub Actions enabled
 # - GITHUB_TOKEN has write permissions to releases (default)
+# - GitHub Secrets configured: KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
 
 name: Build and Release APK
 
@@ -27,6 +28,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -44,9 +51,23 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
       
+      # Decode the keystore from base64 secret and save to temp file
+      - name: Decode and prepare keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > /tmp/release-keystore.keystore
+          echo "Keystore prepared for signing"
+      
       # Build release APK (universal, not split by ABI)
       # Output: build/app/outputs/flutter-apk/app-release.apk
+      # The build.gradle.kts will use the keystore from environment variables
       - name: Build APK
+        env:
+          KEYSTORE_FILE: /tmp/release-keystore.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: flutter build apk --release
       
       # Rename APK to TimeTracker-v{version}.apk for consistency
@@ -64,3 +85,8 @@ jobs:
           files: TimeTracker-v${{ steps.get_version.outputs.version }}.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Clean up keystore file for security
+      - name: Clean up keystore
+        if: always()
+        run: rm -f /tmp/release-keystore.keystore
