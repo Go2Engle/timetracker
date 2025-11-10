@@ -92,6 +92,34 @@ A summary row at the end shows the total elapsed time.
 - Manual testing on Android device recommended
 - Unit tests: `flutter test`
 
+## Releases
+
+### Creating a Release
+
+This project uses GitHub Actions to automatically build and attach Android APK files to releases.
+
+**To create a release:**
+
+1. Ensure the version in `pubspec.yaml` matches your desired release version
+2. Create and push a tag following the format `v{major}.{minor}.{patch}`:
+   ```bash
+   git tag v1.0.2
+   git push origin v1.0.2
+   ```
+3. Create a GitHub release from the tag (via GitHub web UI or CLI)
+4. The GitHub Actions workflow will automatically:
+   - Build a release APK
+   - Name it `TimeTracker-v{version}.apk` (e.g., `TimeTracker-v1.0.2.apk`)
+   - Attach it to the release
+
+**Important:** The tag must start with `v` followed by semantic versioning (e.g., `v1.0.2`, `v2.1.0`).
+
+### Downloading Releases
+
+APK files are available in the [Releases](../../releases) section. Download the latest `TimeTracker-v{version}.apk` file and install it on your Android device.
+
+**Note:** Current releases use debug signing and are suitable for testing and development. They are not signed for Google Play Store distribution.
+
 ## Project Structure
 ```
 lib/

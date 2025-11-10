@@ -1,0 +1,63 @@
+# GitHub Actions Workflow: Build and Release APK
+# 
+# This workflow automatically builds an Android APK when a GitHub release is published.
+# The APK is named with the release version (e.g., TimeTracker-v1.0.2.apk) and attached
+# to the release as a downloadable asset.
+#
+# Requirements:
+# - Release tag must follow format: v{major}.{minor}.{patch} (e.g., v1.0.2)
+# - Repository must have GitHub Actions enabled
+# - GITHUB_TOKEN has write permissions to releases (default)
+
+name: Build and Release APK
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      
+      # Extract version from tag (e.g., refs/tags/v1.0.2 -> 1.0.2)
+      # Uses POSIX shell parameter expansion to remove 'refs/tags/v' prefix
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+      
+      - name: Install dependencies
+        run: flutter pub get
+      
+      # Build release APK (universal, not split by ABI)
+      # Output: build/app/outputs/flutter-apk/app-release.apk
+      - name: Build APK
+        run: flutter build apk --release
+      
+      # Rename APK to TimeTracker-v{version}.apk for consistency
+      - name: Rename APK
+        run: |
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             TimeTracker-v${{ steps.get_version.outputs.version }}.apk
+          echo "APK renamed to: TimeTracker-v${{ steps.get_version.outputs.version }}.apk"
+      
+      # Upload APK to GitHub release assets
+      # GITHUB_TOKEN is automatically provided by GitHub Actions
+      - name: Upload APK to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: TimeTracker-v${{ steps.get_version.outputs.version }}.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
