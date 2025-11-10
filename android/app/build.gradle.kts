@@ -50,20 +50,30 @@ android {
                 keyPassword = keystoreProperties["keyPassword"] as String
             } else {
                 // CI build: read from environment variables
-                storeFile = System.getenv("KEYSTORE_FILE")?.let { file(it) }
-                storePassword = System.getenv("KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("KEY_ALIAS")
-                keyPassword = System.getenv("KEY_PASSWORD")
+                val keystoreFilePath = System.getenv("KEYSTORE_FILE")
+                if (keystoreFilePath != null) {
+                    storeFile = file(keystoreFilePath)
+                    storePassword = System.getenv("KEYSTORE_PASSWORD")
+                    keyAlias = System.getenv("KEY_ALIAS")
+                    keyPassword = System.getenv("KEY_PASSWORD")
+                }
             }
         }
     }
 
     buildTypes {
         release {
-            // Use release signing config if available, otherwise fall back to debug
-            signingConfig = signingConfigs.findByName("release")?.takeIf {
-                it.storeFile?.exists() == true
-            } ?: signingConfigs.getByName("debug")
+            // Try to use release signing config, fall back to debug if not available
+            val releaseConfig = signingConfigs.findByName("release")
+            
+            // Use release config if storeFile is set (either from key.properties or env vars)
+            signingConfig = if (releaseConfig?.storeFile != null) {
+                println("Using release signing configuration")
+                releaseConfig
+            } else {
+                println("WARNING: No release signing config found, using debug keystore")
+                signingConfigs.getByName("debug")
+            }
             
             // Disable minification for apps distributed outside Play Store
             // This avoids R8/ProGuard issues with missing Play Core libraries
