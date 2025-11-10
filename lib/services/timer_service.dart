@@ -241,14 +241,12 @@ class TimerService {
     final state = _activeTimers[taskId];
     if (state == null) return;
 
-    // Save final state
-    await _saveTimerState(taskId);
-
-    // Update to stopped status
+    // Get the task and update to stopped status with final elapsed time
     final task = await _taskRepo.getTaskById(taskId);
     if (task != null) {
       await _taskRepo.updateTask(
         task.copyWith(
+          elapsedSeconds: state.elapsedSeconds,
           status: TaskStatus.stopped,
           endTime: DateTime.now(),
         ),

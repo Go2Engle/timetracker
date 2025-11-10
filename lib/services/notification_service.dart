@@ -106,11 +106,21 @@ class NotificationService {
   }
 
   Future<void> cancelNotification(int taskId) async {
-    await _notifications.cancel(taskId);
+    try {
+      await _notifications.cancel(taskId);
+    } catch (e) {
+      // Silently catch notification cancellation errors
+      // This can happen on Android due to plugin issues with missing type parameters
+      // The notification will be removed when the app is closed or by the system
+    }
   }
 
   Future<void> cancelAllNotifications() async {
-    await _notifications.cancelAll();
+    try {
+      await _notifications.cancelAll();
+    } catch (e) {
+      // Silently catch notification cancellation errors
+    }
   }
 
   Future<bool> requestPermissions() async {
