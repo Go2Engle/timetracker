@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
+import 'package:flutter/widgets.dart';
 import '../models/task.dart';
 import '../repositories/task_repository.dart';
 import 'notification_service.dart';
@@ -12,6 +13,7 @@ class TimerState {
   final bool isRunning;
   final bool isPaused;
   final DateTime? sessionStartTime;
+  final int baseElapsedSeconds; // Elapsed seconds when session started
 
   TimerState({
     required this.taskId,
@@ -19,13 +21,15 @@ class TimerState {
     required this.isRunning,
     required this.isPaused,
     this.sessionStartTime,
-  });
+    int? baseElapsedSeconds,
+  }) : baseElapsedSeconds = baseElapsedSeconds ?? elapsedSeconds;
 
   TimerState copyWith({
     int? elapsedSeconds,
     bool? isRunning,
     bool? isPaused,
     DateTime? sessionStartTime,
+    int? baseElapsedSeconds,
   }) {
     return TimerState(
       taskId: taskId,
@@ -33,11 +37,12 @@ class TimerState {
       isRunning: isRunning ?? this.isRunning,
       isPaused: isPaused ?? this.isPaused,
       sessionStartTime: sessionStartTime ?? this.sessionStartTime,
+      baseElapsedSeconds: baseElapsedSeconds ?? this.baseElapsedSeconds,
     );
   }
 }
 
-class TimerService {
+class TimerService with WidgetsBindingObserver {
   static final TimerService _instance = TimerService._internal();
   factory TimerService() => _instance;
   TimerService._internal();
@@ -54,6 +59,25 @@ class TimerService {
   bool _foregroundServiceActive = false;
 
   Stream<Map<int, TimerState>> get timerUpdates => _timerController.stream;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // When app resumes, sync from foreground service to catch up
+      _syncFromForegroundServiceOnResume();
+    }
+  }
+
+  Future<void> _syncFromForegroundServiceOnResume() async {
+    if (!Platform.isAndroid || !_foregroundServiceActive) return;
+    
+    try {
+      await _syncFromForegroundService();
+      _broadcastUpdate();
+    } catch (e) {
+      print('Error syncing from foreground service on resume: $e');
+    }
+  }
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -78,8 +102,12 @@ class TimerService {
       if (Platform.isAndroid && _activeTimers.containsKey(task.id!)) {
         // Already loaded from foreground service, use that value
         totalElapsed = _activeTimers[task.id!]!.elapsedSeconds;
+        // baseElapsedSeconds is already set correctly from foreground service sync
+        
+        // Update database with the authoritative value from foreground service
+        await _taskRepo.updateTask(task.copyWith(elapsedSeconds: totalElapsed));
       } else {
-        // Calculate from database
+        // Calculate from database (non-Android or service not running)
         final now = DateTime.now();
         final lastUpdateTime = task.updatedAt;
         final timeSinceLastUpdate = now.difference(lastUpdateTime).inSeconds;
@@ -90,12 +118,13 @@ class TimerService {
           elapsedSeconds: totalElapsed,
           isRunning: true,
           isPaused: false,
-          sessionStartTime: lastUpdateTime,
+          sessionStartTime: now, // Use NOW, not lastUpdateTime
+          baseElapsedSeconds: totalElapsed, // Set base to the calculated total
         );
+        
+        // Update database with current elapsed time
+        await _taskRepo.updateTask(task.copyWith(elapsedSeconds: totalElapsed));
       }
-      
-      // Update database with current elapsed time
-      await _taskRepo.updateTask(task.copyWith(elapsedSeconds: totalElapsed));
     }
 
     // Load paused tasks
@@ -120,6 +149,9 @@ class TimerService {
       await _syncToForegroundService();
     }
     
+    // Register lifecycle observer
+    WidgetsBinding.instance.addObserver(this);
+    
     _initialized = true;
 
     _broadcastUpdate();
@@ -138,22 +170,30 @@ class TimerService {
           hasUpdate = _activeTimers.values.any((t) => t.isRunning);
         }
       } else {
-        // On other platforms, increment timers and update notifications
+        // On other platforms, calculate elapsed time from session start timestamp
+        final now = DateTime.now();
         for (final entry in _activeTimers.entries) {
           if (entry.value.isRunning && !entry.value.isPaused) {
-            _activeTimers[entry.key] = entry.value.copyWith(
-              elapsedSeconds: entry.value.elapsedSeconds + 1,
-            );
-            hasUpdate = true;
-            
-            final task = await _taskRepo.getTaskById(entry.key);
-            if (task != null) {
-              await _notificationService.updateTimerNotification(
-                task: task,
-                elapsedSeconds: entry.value.elapsedSeconds,
-                isRunning: entry.value.isRunning,
-                isPaused: entry.value.isPaused,
+            final state = entry.value;
+            if (state.sessionStartTime != null) {
+              // Calculate: base + (current time - session start time)
+              final sessionDuration = now.difference(state.sessionStartTime!).inSeconds;
+              final totalElapsed = state.baseElapsedSeconds + sessionDuration;
+              
+              _activeTimers[entry.key] = state.copyWith(
+                elapsedSeconds: totalElapsed,
               );
+              hasUpdate = true;
+              
+              final task = await _taskRepo.getTaskById(entry.key);
+              if (task != null) {
+                await _notificationService.updateTimerNotification(
+                  task: task,
+                  elapsedSeconds: totalElapsed,
+                  isRunning: state.isRunning,
+                  isPaused: state.isPaused,
+                );
+              }
             }
           }
         }
@@ -228,23 +268,29 @@ class TimerService {
       
       final timersJson = result['timerStates'] as String;
       final timersList = jsonDecode(timersJson) as List;
+      final now = DateTime.now();
       
       // Update Flutter timer states with authoritative values from service
       for (final timerJson in timersList) {
         final timerData = TimerData.fromJson(timerJson as Map<String, dynamic>);
         
-        if (_activeTimers.containsKey(timerData.taskId)) {
-          _activeTimers[timerData.taskId] = _activeTimers[timerData.taskId]!.copyWith(
+        // The foreground service gives us the current calculated elapsed seconds
+        // We use that as our new base, and set sessionStartTime to NOW
+        _activeTimers[timerData.taskId] = TimerState(
+          taskId: timerData.taskId,
+          elapsedSeconds: timerData.elapsedSeconds,
+          isRunning: timerData.isRunning,
+          isPaused: timerData.isPaused,
+          sessionStartTime: now, // Set to NOW since we're syncing at this moment
+          baseElapsedSeconds: timerData.elapsedSeconds, // Use current elapsed as base
+        );
+        
+        // Also update the database with the authoritative value
+        final task = await _taskRepo.getTaskById(timerData.taskId);
+        if (task != null) {
+          await _taskRepo.updateTask(task.copyWith(
             elapsedSeconds: timerData.elapsedSeconds,
-          );
-          
-          // Also update the database with the authoritative value
-          final task = await _taskRepo.getTaskById(timerData.taskId);
-          if (task != null) {
-            await _taskRepo.updateTask(task.copyWith(
-              elapsedSeconds: timerData.elapsedSeconds,
-            ));
-          }
+          ));
         }
       }
       
@@ -289,6 +335,7 @@ class TimerService {
       isRunning: true,
       isPaused: false,
       sessionStartTime: DateTime.now(),
+      baseElapsedSeconds: task.elapsedSeconds, // Set base to current elapsed
     );
 
     // Update task status in database
@@ -348,6 +395,7 @@ class TimerService {
       isRunning: true,
       isPaused: false,
       sessionStartTime: DateTime.now(),
+      baseElapsedSeconds: state.elapsedSeconds, // Set base to current when resuming
     );
 
     await _saveTimerState(taskId);
@@ -414,6 +462,9 @@ class TimerService {
   }
 
   void dispose() {
+    // Remove lifecycle observer
+    WidgetsBinding.instance.removeObserver(this);
+    
     _tickTimer?.cancel();
     _saveTimer?.cancel();
     _timerController.close();

@@ -42,7 +42,8 @@ class TimerForegroundService : Service() {
         var elapsedSeconds: Int,
         val isRunning: Boolean,
         val isPaused: Boolean,
-        val sessionStartTime: Long
+        val sessionStartTime: Long,
+        val baseElapsedSeconds: Int // Elapsed seconds when session started
     )
     
     override fun onCreate() {
@@ -89,14 +90,16 @@ class TimerForegroundService : Service() {
             
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
+                val elapsedSecs = obj.getInt("elapsedSeconds")
                 timersData.add(
                     TimerData(
                         taskId = obj.getInt("taskId"),
                         taskName = obj.getString("taskName"),
-                        elapsedSeconds = obj.getInt("elapsedSeconds"),
+                        elapsedSeconds = elapsedSecs,
                         isRunning = obj.getBoolean("isRunning"),
                         isPaused = obj.getBoolean("isPaused"),
-                        sessionStartTime = obj.getLong("sessionStartTime")
+                        sessionStartTime = obj.getLong("sessionStartTime"),
+                        baseElapsedSeconds = elapsedSecs // Set base to current elapsed
                     )
                 )
             }
@@ -107,11 +110,14 @@ class TimerForegroundService : Service() {
     
     private fun updateTimers() {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val currentTime = System.currentTimeMillis()
         
-        // Update elapsed time for running timers
+        // Update elapsed time for running timers using timestamp calculation
         for (timer in timersData) {
             if (timer.isRunning && !timer.isPaused) {
-                timer.elapsedSeconds++
+                // Calculate elapsed time: base + (current time - session start time)
+                val sessionDurationSeconds = (currentTime - timer.sessionStartTime) / 1000
+                timer.elapsedSeconds = timer.baseElapsedSeconds + sessionDurationSeconds.toInt()
                 
                 // Update individual timer notification
                 updateTimerNotification(timer, notificationManager)
