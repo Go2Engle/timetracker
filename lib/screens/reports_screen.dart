@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:file_picker/file_picker.dart';
 import '../models/task.dart';
 import '../models/tag.dart';
 import '../models/category.dart';
@@ -147,14 +148,35 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   Future<void> _exportReport() async {
     try {
+      // Generate filename with timestamp
+      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final fileName = 'timetracker_report_$timestamp.csv';
+
+      // Let user choose directory to save CSV export
+      final directoryPath = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Select Export Location',
+      );
+
+      // User cancelled
+      if (directoryPath == null) {
+        return;
+      }
+
+      // Create full file path
+      final filePath = '$directoryPath/$fileName';
+
+      // Export to CSV
       final tasks = _filteredTasksWithDetails.map((td) => td.task).toList();
-      final filePath = await _exportService.exportToCSV(tasks, _totalSeconds);
+      await _exportService.exportToCSV(tasks, _totalSeconds, filePath);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Report exported to $filePath'),
+            content: Text(
+              'Report exported successfully:\n$fileName\n\nSaved to: $directoryPath',
+            ),
             duration: const Duration(seconds: 5),
+            action: SnackBarAction(label: 'OK', onPressed: () {}),
           ),
         );
       }

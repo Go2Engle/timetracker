@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:path_provider/path_provider.dart';
 import 'package:intl/intl.dart';
 import '../models/task.dart';
 import '../models/tag.dart';
@@ -12,18 +11,10 @@ class ReportExportService {
 
   /// Export tasks to CSV file
   /// Returns the file path on success, throws exception on error
-  Future<String> exportToCSV(List<Task> tasks, int totalSeconds) async {
+  Future<String> exportToCSV(List<Task> tasks, int totalSeconds, String filePath) async {
     try {
       // Generate CSV content
       final csvContent = await _generateCSVContent(tasks, totalSeconds);
-      
-      // Get appropriate directory based on platform
-      final directory = await _getExportDirectory();
-      
-      // Generate filename with timestamp
-      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-      final filename = 'timetracker_report_$timestamp.csv';
-      final filePath = '${directory.path}/$filename';
       
       // Write file
       final file = File(filePath);
@@ -33,21 +24,6 @@ class ReportExportService {
     } catch (e) {
       throw Exception('Failed to export report: $e');
     }
-  }
-
-  /// Get the appropriate directory for saving exports
-  Future<Directory> _getExportDirectory() async {
-    if (Platform.isAndroid) {
-      // On Android, use the app's external storage directory
-      // This is accessible to the user through the Files app
-      final directory = await getExternalStorageDirectory();
-      if (directory != null) {
-        return directory;
-      }
-    }
-    
-    // iOS or fallback: use application documents directory
-    return await getApplicationDocumentsDirectory();
   }
 
   /// Generate CSV content from tasks
