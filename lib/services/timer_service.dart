@@ -58,37 +58,57 @@ class TimerService {
   Future<void> initialize() async {
     if (_initialized) return;
 
+    // On Android, check if foreground service is already running
+    if (Platform.isAndroid) {
+      final isServiceRunning = await ForegroundTimerService.isServiceRunning();
+      if (isServiceRunning) {
+        _foregroundServiceActive = true;
+        // Sync from the running service to get current state
+        await _syncFromForegroundService();
+      }
+    }
+    
     // Load running tasks from database and restore timers
     final runningTasks = await _taskRepo.getRunningTasks();
     for (final task in runningTasks) {
-      // For running tasks, calculate elapsed time from last update
-      // We use the task's updatedAt as the session start reference
-      final now = DateTime.now();
-      final lastUpdateTime = task.updatedAt;
-      final timeSinceLastUpdate = now.difference(lastUpdateTime).inSeconds;
-      final totalElapsed = task.elapsedSeconds + timeSinceLastUpdate;
+      // On Android with active service, use synced values
+      // Otherwise calculate elapsed time from last update
+      int totalElapsed;
       
-      _activeTimers[task.id!] = TimerState(
-        taskId: task.id!,
-        elapsedSeconds: totalElapsed,
-        isRunning: true,
-        isPaused: false,
-        sessionStartTime: lastUpdateTime,
-      );
+      if (Platform.isAndroid && _activeTimers.containsKey(task.id!)) {
+        // Already loaded from foreground service, use that value
+        totalElapsed = _activeTimers[task.id!]!.elapsedSeconds;
+      } else {
+        // Calculate from database
+        final now = DateTime.now();
+        final lastUpdateTime = task.updatedAt;
+        final timeSinceLastUpdate = now.difference(lastUpdateTime).inSeconds;
+        totalElapsed = task.elapsedSeconds + timeSinceLastUpdate;
+        
+        _activeTimers[task.id!] = TimerState(
+          taskId: task.id!,
+          elapsedSeconds: totalElapsed,
+          isRunning: true,
+          isPaused: false,
+          sessionStartTime: lastUpdateTime,
+        );
+      }
       
-      // Update database with corrected elapsed time
+      // Update database with current elapsed time
       await _taskRepo.updateTask(task.copyWith(elapsedSeconds: totalElapsed));
     }
 
     // Load paused tasks
     final pausedTasks = await _taskRepo.getTasksByStatus(TaskStatus.paused);
     for (final task in pausedTasks) {
-      _activeTimers[task.id!] = TimerState(
-        taskId: task.id!,
-        elapsedSeconds: task.elapsedSeconds,
-        isRunning: false,
-        isPaused: true,
-      );
+      if (!_activeTimers.containsKey(task.id!)) {
+        _activeTimers[task.id!] = TimerState(
+          taskId: task.id!,
+          elapsedSeconds: task.elapsedSeconds,
+          isRunning: false,
+          isPaused: true,
+        );
+      }
     }
 
     // Start the tick timer
