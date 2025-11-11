@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io' show Platform;
 import '../models/task.dart';
 import '../repositories/task_repository.dart';
 import 'notification_service.dart';
+import 'foreground_timer_service.dart';
 
 class TimerState {
   final int taskId;
@@ -48,6 +51,7 @@ class TimerService {
   Timer? _tickTimer;
   Timer? _saveTimer;
   bool _initialized = false;
+  bool _foregroundServiceActive = false;
 
   Stream<Map<int, TimerState>> get timerUpdates => _timerController.stream;
 
@@ -90,6 +94,12 @@ class TimerService {
     // Start the tick timer
     _startTickTimer();
     _startAutoSaveTimer();
+    
+    // Start foreground service on Android if there are running timers
+    if (Platform.isAndroid && _activeTimers.values.any((t) => t.isRunning)) {
+      await _syncToForegroundService();
+    }
+    
     _initialized = true;
 
     _broadcastUpdate();
@@ -99,25 +109,36 @@ class TimerService {
     _tickTimer?.cancel();
     _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
       bool hasUpdate = false;
-      for (final entry in _activeTimers.entries) {
-        if (entry.value.isRunning && !entry.value.isPaused) {
-          _activeTimers[entry.key] = entry.value.copyWith(
-            elapsedSeconds: entry.value.elapsedSeconds + 1,
-          );
-          hasUpdate = true;
-          
-          // Update notification
-          final task = await _taskRepo.getTaskById(entry.key);
-          if (task != null) {
-            await _notificationService.updateTimerNotification(
-              task: task,
-              elapsedSeconds: entry.value.elapsedSeconds,
-              isRunning: entry.value.isRunning,
-              isPaused: entry.value.isPaused,
+      
+      if (Platform.isAndroid) {
+        // On Android, just sync from foreground service every second
+        // Don't increment - the service is doing that
+        if (_foregroundServiceActive) {
+          await _syncFromForegroundService();
+          hasUpdate = _activeTimers.values.any((t) => t.isRunning);
+        }
+      } else {
+        // On other platforms, increment timers and update notifications
+        for (final entry in _activeTimers.entries) {
+          if (entry.value.isRunning && !entry.value.isPaused) {
+            _activeTimers[entry.key] = entry.value.copyWith(
+              elapsedSeconds: entry.value.elapsedSeconds + 1,
             );
+            hasUpdate = true;
+            
+            final task = await _taskRepo.getTaskById(entry.key);
+            if (task != null) {
+              await _notificationService.updateTimerNotification(
+                task: task,
+                elapsedSeconds: entry.value.elapsedSeconds,
+                isRunning: entry.value.isRunning,
+                isPaused: entry.value.isPaused,
+              );
+            }
           }
         }
       }
+      
       if (hasUpdate) {
         _broadcastUpdate();
       }
@@ -127,12 +148,90 @@ class TimerService {
   void _startAutoSaveTimer() {
     _saveTimer?.cancel();
     _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
-      for (final state in _activeTimers.values) {
-        if (state.isRunning) {
-          await _saveTimerState(state.taskId);
+      // Only save timer state on non-Android platforms
+      // On Android, the foreground service handles persistence
+      if (!Platform.isAndroid) {
+        for (final state in _activeTimers.values) {
+          if (state.isRunning) {
+            await _saveTimerState(state.taskId);
+          }
         }
       }
     });
+  }
+  
+  /// Sync timer data to Android foreground service
+  Future<void> _syncToForegroundService() async {
+    if (!Platform.isAndroid) return;
+    
+    final hasRunningTimers = _activeTimers.values.any((t) => t.isRunning);
+    
+    if (hasRunningTimers) {
+      // Build timer data list
+      final timerDataList = <TimerData>[];
+      
+      for (final state in _activeTimers.values) {
+        final task = await _taskRepo.getTaskById(state.taskId);
+        if (task != null) {
+          timerDataList.add(TimerData(
+            taskId: state.taskId,
+            taskName: task.title,
+            elapsedSeconds: state.elapsedSeconds,
+            isRunning: state.isRunning,
+            isPaused: state.isPaused,
+            sessionStartTime: (state.sessionStartTime ?? DateTime.now()).millisecondsSinceEpoch,
+          ));
+        }
+      }
+      
+      // Start or update foreground service
+      if (_foregroundServiceActive) {
+        await ForegroundTimerService.updateTimers(timerDataList);
+      } else {
+        await ForegroundTimerService.startForegroundService(timerDataList);
+        _foregroundServiceActive = true;
+      }
+    } else if (_foregroundServiceActive) {
+      // No running timers, stop foreground service
+      await ForegroundTimerService.stopForegroundService();
+      _foregroundServiceActive = false;
+    }
+  }
+  
+  /// Sync timer states FROM the foreground service (foreground service is source of truth)
+  Future<void> _syncFromForegroundService() async {
+    if (!Platform.isAndroid) return;
+    
+    try {
+      final result = await ForegroundTimerService.getTimerStates();
+      if (result == null || result['timerStates'] == null) return;
+      
+      final timersJson = result['timerStates'] as String;
+      final timersList = jsonDecode(timersJson) as List;
+      
+      // Update Flutter timer states with authoritative values from service
+      for (final timerJson in timersList) {
+        final timerData = TimerData.fromJson(timerJson as Map<String, dynamic>);
+        
+        if (_activeTimers.containsKey(timerData.taskId)) {
+          _activeTimers[timerData.taskId] = _activeTimers[timerData.taskId]!.copyWith(
+            elapsedSeconds: timerData.elapsedSeconds,
+          );
+          
+          // Also update the database with the authoritative value
+          final task = await _taskRepo.getTaskById(timerData.taskId);
+          if (task != null) {
+            await _taskRepo.updateTask(task.copyWith(
+              elapsedSeconds: timerData.elapsedSeconds,
+            ));
+          }
+        }
+      }
+      
+      _broadcastUpdate();
+    } catch (e) {
+      print('Error syncing from foreground service: $e');
+    }
   }
 
   Future<void> _saveTimerState(int taskId) async {
@@ -175,13 +274,18 @@ class TimerService {
     // Update task status in database
     await _taskRepo.updateTask(task.copyWith(status: TaskStatus.running));
 
-    // Show notification
-    await _notificationService.showTimerNotification(
-      task: task,
-      elapsedSeconds: task.elapsedSeconds,
-      isRunning: true,
-      isPaused: false,
-    );
+    // Sync to foreground service on Android (it will handle notifications)
+    // On other platforms, show notification directly
+    if (Platform.isAndroid) {
+      await _syncToForegroundService();
+    } else {
+      await _notificationService.showTimerNotification(
+        task: task,
+        elapsedSeconds: task.elapsedSeconds,
+        isRunning: true,
+        isPaused: false,
+      );
+    }
 
     _broadcastUpdate();
   }
@@ -197,15 +301,20 @@ class TimerService {
 
     await _saveTimerState(taskId);
     
-    // Update notification to show paused state
-    final task = await _taskRepo.getTaskById(taskId);
-    if (task != null) {
-      await _notificationService.updateTimerNotification(
-        task: task,
-        elapsedSeconds: state.elapsedSeconds,
-        isRunning: false,
-        isPaused: true,
-      );
+    // Sync to foreground service on Android (it will handle notifications)
+    // On other platforms, update notification directly
+    if (Platform.isAndroid) {
+      await _syncToForegroundService();
+    } else {
+      final task = await _taskRepo.getTaskById(taskId);
+      if (task != null) {
+        await _notificationService.updateTimerNotification(
+          task: task,
+          elapsedSeconds: state.elapsedSeconds,
+          isRunning: false,
+          isPaused: true,
+        );
+      }
     }
     
     _broadcastUpdate();
@@ -223,15 +332,20 @@ class TimerService {
 
     await _saveTimerState(taskId);
     
-    // Update notification to show running state
-    final task = await _taskRepo.getTaskById(taskId);
-    if (task != null) {
-      await _notificationService.updateTimerNotification(
-        task: task,
-        elapsedSeconds: state.elapsedSeconds,
-        isRunning: true,
-        isPaused: false,
-      );
+    // Sync to foreground service on Android (it will handle notifications)
+    // On other platforms, update notification directly
+    if (Platform.isAndroid) {
+      await _syncToForegroundService();
+    } else {
+      final task = await _taskRepo.getTaskById(taskId);
+      if (task != null) {
+        await _notificationService.updateTimerNotification(
+          task: task,
+          elapsedSeconds: state.elapsedSeconds,
+          isRunning: true,
+          isPaused: false,
+        );
+      }
     }
     
     _broadcastUpdate();
@@ -258,6 +372,12 @@ class TimerService {
 
     // Remove from active timers
     _activeTimers.remove(taskId);
+    
+    // Sync to foreground service on Android (might stop service if no more timers)
+    if (Platform.isAndroid) {
+      await _syncToForegroundService();
+    }
+    
     _broadcastUpdate();
   }
 
@@ -277,6 +397,13 @@ class TimerService {
     _tickTimer?.cancel();
     _saveTimer?.cancel();
     _timerController.close();
+    
+    // Stop foreground service on Android when disposing
+    if (Platform.isAndroid && _foregroundServiceActive) {
+      ForegroundTimerService.stopForegroundService();
+      _foregroundServiceActive = false;
+    }
+    
     _initialized = false;
   }
 }
