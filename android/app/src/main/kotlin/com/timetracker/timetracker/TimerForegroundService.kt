@@ -134,6 +134,14 @@ class TimerForegroundService : Service() {
             else -> "Stopped"
         }
         
+        val intent = packageManager.getLaunchIntentForPackage(packageName)
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            timer.taskId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        
         val notification = NotificationCompat.Builder(this, "task_timers")
             .setContentTitle(timer.taskName)
             .setContentText("$statusText • $timeText")
@@ -141,6 +149,7 @@ class TimerForegroundService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(timer.isRunning)
             .setAutoCancel(false)
+            .setContentIntent(pendingIntent)
             .build()
         
         notificationManager.notify(timer.taskId, notification)
