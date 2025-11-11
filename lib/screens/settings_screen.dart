@@ -5,6 +5,7 @@ import '../widgets/category_management_section.dart';
 import '../widgets/tag_management_section.dart';
 import '../services/backup_service.dart';
 import '../repositories/task_repository.dart';
+import 'battery_optimization_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -29,6 +30,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildSectionHeader(context, 'Data Management'),
           const CategoryManagementSection(),
           const TagManagementSection(),
+          const Divider(height: 32),
+
+          // System Settings Section
+          _buildSectionHeader(context, 'System Settings'),
+          ListTile(
+            leading: const Icon(Icons.battery_charging_full),
+            title: const Text('Battery Optimization'),
+            subtitle: const Text('Ensure timers run reliably in background'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const BatteryOptimizationScreen(),
+                ),
+              );
+            },
+          ),
           const Divider(height: 32),
 
           // Backup & Export Section
