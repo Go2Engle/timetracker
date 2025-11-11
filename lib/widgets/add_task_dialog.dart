@@ -217,17 +217,21 @@ class _AddTaskDialogState extends State<AddTaskDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final dialogWidth = screenWidth * 0.9; // 90% of screen width
+    
     return AlertDialog(
       title: const Text('New Task'),
+      contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
       content: _isLoading
-          ? const SizedBox(
-              width: 300,
+          ? SizedBox(
+              width: dialogWidth,
               height: 200,
-              child: Center(child: CircularProgressIndicator()),
+              child: const Center(child: CircularProgressIndicator()),
             )
-          : SingleChildScrollView(
-              child: SizedBox(
-                width: 300,
+          : SizedBox(
+              width: dialogWidth,
+              child: SingleChildScrollView(
                 child: Form(
                   key: _formKey,
                   child: Column(
