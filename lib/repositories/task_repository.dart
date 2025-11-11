@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 import '../models/task.dart';
 import '../models/tag.dart';
+import '../models/category.dart';
 import '../services/database_service.dart';
 
 class TaskRepository {
@@ -227,4 +228,110 @@ class TaskRepository {
       return List.generate(maps.length, (i) => Task.fromMap(maps[i]));
     }
   }
+
+  /// Get tasks grouped by category
+  /// Returns a Map where keys are Category objects (or null for uncategorized)
+  /// and values are Lists of Tasks
+  Future<Map<Category?, List<Task>>> getTasksGroupedByCategory() async {
+    final db = await _dbService.database;
+    
+    // Get all tasks with their category info
+    final query = '''
+      SELECT tasks.*, categories.id as cat_id, categories.name as cat_name, 
+             categories.color as cat_color, categories.createdAt as cat_createdAt
+      FROM tasks
+      LEFT JOIN categories ON tasks.categoryId = categories.id
+      ORDER BY categories.name ASC, tasks.startTime DESC
+    ''';
+    
+    final List<Map<String, dynamic>> maps = await db.rawQuery(query);
+    
+    final Map<Category?, List<Task>> grouped = {};
+    
+    for (final map in maps) {
+      final task = Task.fromMap(map);
+      
+      Category? category;
+      if (map['cat_id'] != null) {
+        category = Category(
+          id: map['cat_id'] as int?,
+          name: map['cat_name'] as String,
+          color: map['cat_color'] as String,
+          createdAt: DateTime.parse(map['cat_createdAt'] as String),
+        );
+      }
+      
+      if (!grouped.containsKey(category)) {
+        grouped[category] = [];
+      }
+      grouped[category]!.add(task);
+    }
+    
+    return grouped;
+  }
+
+  /// Get time totals for each category
+  /// Returns a List of Maps containing category, totalSeconds, and taskCount
+  Future<List<Map<String, dynamic>>> getCategoryTimeTotals() async {
+    final db = await _dbService.database;
+    
+    final query = '''
+      SELECT 
+        categories.id as cat_id,
+        categories.name as cat_name,
+        categories.color as cat_color,
+        categories.createdAt as cat_createdAt,
+        SUM(tasks.elapsedSeconds) as totalSeconds,
+        COUNT(tasks.id) as taskCount
+      FROM categories
+      LEFT JOIN tasks ON tasks.categoryId = categories.id
+      GROUP BY categories.id
+      ORDER BY totalSeconds DESC
+    ''';
+    
+    final List<Map<String, dynamic>> maps = await db.rawQuery(query);
+    
+    final List<Map<String, dynamic>> results = [];
+    
+    for (final map in maps) {
+      final category = Category(
+        id: map['cat_id'] as int?,
+        name: map['cat_name'] as String,
+        color: map['cat_color'] as String,
+        createdAt: DateTime.parse(map['cat_createdAt'] as String),
+      );
+      
+      results.add({
+        'category': category,
+        'totalSeconds': map['totalSeconds'] as int? ?? 0,
+        'taskCount': map['taskCount'] as int? ?? 0,
+      });
+    }
+    
+    // Add uncategorized tasks
+    final uncategorizedQuery = '''
+      SELECT 
+        SUM(elapsedSeconds) as totalSeconds,
+        COUNT(id) as taskCount
+      FROM tasks
+      WHERE categoryId IS NULL
+    ''';
+    
+    final uncategorizedMaps = await db.rawQuery(uncategorizedQuery);
+    if (uncategorizedMaps.isNotEmpty) {
+      final totalSeconds = uncategorizedMaps.first['totalSeconds'] as int? ?? 0;
+      final taskCount = uncategorizedMaps.first['taskCount'] as int? ?? 0;
+      
+      if (taskCount > 0) {
+        results.add({
+          'category': null,
+          'totalSeconds': totalSeconds,
+          'taskCount': taskCount,
+        });
+      }
+    }
+    
+    return results;
+  }
 }
+

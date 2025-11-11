@@ -250,35 +250,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         ),
                         const SizedBox(height: 16),
                         
-                        // Tags filter
-                        if (_availableTags.isNotEmpty) ...[
-                          Text(
-                            'Tags',
-                            style: theme.textTheme.labelLarge?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: _availableTags.map((tag) {
-                              final isSelected = _selectedTagIds.contains(tag.id);
-                              return FilterChip(
-                                label: Text(tag.name),
-                                selected: isSelected,
-                                onSelected: (selected) => _toggleTag(tag.id!),
-                                showCheckmark: true,
-                              );
-                            }).toList(),
-                          ),
-                          const SizedBox(height: 16),
-                        ],
-
-                        // Category filter
+                        // Project/Client filter
                         if (_availableCategories.isNotEmpty) ...[
                           Text(
-                            'Category',
+                            'Project/Client',
                             style: theme.textTheme.labelLarge?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
@@ -294,11 +269,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               filled: true,
                               fillColor: theme.colorScheme.surfaceContainerHighest,
                             ),
-                            hint: const Text('All categories'),
+                            hint: const Text('All projects/clients'),
                             items: [
                               const DropdownMenuItem<int?>(
                                 value: null,
-                                child: Text('All categories'),
+                                child: Text('All projects/clients'),
                               ),
                               ..._availableCategories.map((category) {
                                 return DropdownMenuItem<int?>(
@@ -321,6 +296,31 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               }),
                             ],
                             onChanged: _selectCategory,
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+
+                        // Tags filter
+                        if (_availableTags.isNotEmpty) ...[
+                          Text(
+                            'Tags',
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: _availableTags.map((tag) {
+                              final isSelected = _selectedTagIds.contains(tag.id);
+                              return FilterChip(
+                                label: Text(tag.name),
+                                selected: isSelected,
+                                onSelected: (selected) => _toggleTag(tag.id!),
+                                showCheckmark: true,
+                              );
+                            }).toList(),
                           ),
                         ],
 

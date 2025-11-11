@@ -60,14 +60,15 @@ class _AddTaskDialogState extends State<AddTaskDialog> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('New Category'),
+          title: const Text('New Project/Client'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: nameController,
                 decoration: const InputDecoration(
-                  labelText: 'Category Name',
+                  labelText: 'Project/Client Name',
+                  hintText: 'e.g., Acme Corp, Website Project',
                   border: OutlineInputBorder(),
                 ),
                 autofocus: true,
@@ -264,7 +265,8 @@ class _AddTaskDialogState extends State<AddTaskDialog> {
                           Expanded(
                             child: DropdownButtonFormField<Category>(
                               decoration: const InputDecoration(
-                                labelText: 'Category (optional)',
+                                labelText: 'Project/Client',
+                                hintText: 'Select customer or project',
                                 border: OutlineInputBorder(),
                               ),
                               items: _categories.map((category) {
@@ -299,7 +301,7 @@ class _AddTaskDialogState extends State<AddTaskDialog> {
                           IconButton.filledTonal(
                             onPressed: _showCreateCategoryDialog,
                             icon: const Icon(Icons.add),
-                            tooltip: 'New Category',
+                            tooltip: 'New Project/Client',
                           ),
                         ],
                       ),

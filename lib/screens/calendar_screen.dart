@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
 import '../models/task.dart';
+import '../models/category.dart';
 import '../repositories/task_repository.dart';
+import '../repositories/category_repository.dart';
+import '../widgets/category_badge.dart';
 import '../utils/time_formatter.dart';
 import 'task_detail_screen.dart';
 
@@ -27,19 +30,32 @@ class CalendarScreen extends StatefulWidget {
 
 class _CalendarScreenState extends State<CalendarScreen> {
   final TaskRepository _taskRepo = TaskRepository();
+  final CategoryRepository _categoryRepo = CategoryRepository();
 
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
   List<Task> _tasksForSelectedDay = [];
   Map<DateTime, int> _taskCounts = {};
   bool _isLoading = false;
+  
+  // Category filtering
+  List<Category> _availableCategories = [];
+  int? _selectedCategoryId;
 
   @override
   void initState() {
     super.initState();
     _selectedDay = _focusedDay;
+    _loadCategories();
     _loadTasksForMonth(_focusedDay);
     _loadTasksForSelectedDay();
+  }
+
+  Future<void> _loadCategories() async {
+    final categories = await _categoryRepo.getAllCategories();
+    setState(() {
+      _availableCategories = categories;
+    });
   }
 
   Future<void> _loadTasksForMonth(DateTime month) async {
@@ -68,10 +84,15 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
     setState(() => _isLoading = true);
 
-    final tasks = await _taskRepo.getTasksByDate(_selectedDay!);
+    final allTasks = await _taskRepo.getTasksByDate(_selectedDay!);
+    
+    // Filter by category if selected
+    final filteredTasks = _selectedCategoryId == null
+        ? allTasks
+        : allTasks.where((task) => task.categoryId == _selectedCategoryId).toList();
 
     setState(() {
-      _tasksForSelectedDay = tasks;
+      _tasksForSelectedDay = filteredTasks;
       _isLoading = false;
     });
   }
@@ -117,6 +138,52 @@ class _CalendarScreenState extends State<CalendarScreen> {
     _loadTasksForMonth(_focusedDay);
   }
 
+  Future<void> _showCategoryFilter() async {
+    final result = await showDialog<int?>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Filter by Project/Client'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.clear_all),
+              title: const Text('All tasks'),
+              selected: _selectedCategoryId == null,
+              onTap: () => Navigator.pop(context, -1), // -1 means clear filter
+            ),
+            const Divider(),
+            ..._availableCategories.map((category) {
+              return ListTile(
+                leading: CategoryBadge(
+                  category: category,
+                  showName: false,
+                  size: 24,
+                ),
+                title: Text(category.name),
+                selected: _selectedCategoryId == category.id,
+                onTap: () => Navigator.pop(context, category.id),
+              );
+            }),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null) {
+      setState(() {
+        _selectedCategoryId = result == -1 ? null : result;
+      });
+      await _loadTasksForSelectedDay();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -133,6 +200,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
             elevation: 0,
             title: const Text('Calendar'),
             actions: [
+              if (_availableCategories.isNotEmpty)
+                IconButton(
+                  icon: Icon(
+                    _selectedCategoryId != null ? Icons.filter_alt : Icons.filter_alt_outlined,
+                  ),
+                  onPressed: _showCategoryFilter,
+                  tooltip: 'Filter by Project/Client',
+                ),
               IconButton(
                 icon: const Icon(Icons.today),
                 onPressed: () {
@@ -292,6 +367,36 @@ class _CalendarScreenState extends State<CalendarScreen> {
                           fontWeight: FontWeight.w500,
                         ),
                       ),
+                  ],
+                ),
+              ),
+            ),
+
+          // Active category filter indicator
+          if (_selectedCategoryId != null)
+            SliverToBoxAdapter(
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: Wrap(
+                  spacing: 8,
+                  children: [
+                    CategoryBadge(
+                      category: _availableCategories.firstWhere(
+                        (c) => c.id == _selectedCategoryId,
+                      ),
+                      showName: true,
+                      onTap: _showCategoryFilter,
+                    ),
+                    ActionChip(
+                      label: const Text('Clear'),
+                      onPressed: () async {
+                        setState(() {
+                          _selectedCategoryId = null;
+                        });
+                        await _loadTasksForSelectedDay();
+                      },
+                      visualDensity: VisualDensity.compact,
+                    ),
                   ],
                 ),
               ),

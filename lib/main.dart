@@ -8,11 +8,13 @@ import 'repositories/category_repository.dart';
 import 'repositories/tag_repository.dart';
 import 'services/timer_service.dart';
 import 'services/notification_service.dart';
+import 'services/preferences_service.dart';
 import 'screens/calendar_screen.dart';
 import 'screens/task_detail_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/reports_screen.dart';
 import 'widgets/add_task_dialog.dart';
+import 'widgets/category_badge.dart';
 import 'utils/time_formatter.dart';
 
 // Helper class to hold task with its related data
@@ -32,6 +34,10 @@ class TaskWithDetails {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize preferences service
+  final preferencesService = PreferencesService();
+  await preferencesService.initialize();
   
   // Initialize notification service
   final notificationService = NotificationService();
@@ -129,15 +135,18 @@ class _TaskListScreenState extends State<TaskListScreen> {
   final CategoryRepository _categoryRepo = CategoryRepository();
   final TagRepository _tagRepo = TagRepository();
   final TimerService _timerService = TimerService();
+  final PreferencesService _prefsService = PreferencesService();
   
   List<TaskWithDetails> _allTasksWithDetails = [];
   Map<int, TimerState> _timerStates = {};
   bool _isLoading = false;
+  bool _groupByCategory = false;
   StreamSubscription<Map<int, TimerState>>? _timerSubscription;
 
   @override
   void initState() {
     super.initState();
+    _groupByCategory = _prefsService.getGroupByCategory();
     _loadTasks();
     _listenToTimerUpdates();
   }
@@ -254,6 +263,102 @@ class _TaskListScreenState extends State<TaskListScreen> {
     await _loadTasks();
   }
 
+  /// Build grouped tasks by category
+  List<Widget> _buildGroupedTasks(List<TaskWithDetails> tasks, ThemeData theme) {
+    if (tasks.isEmpty) return [];
+    
+    // Group tasks by category ID (not the object itself, to avoid duplicate groups)
+    final Map<int?, List<TaskWithDetails>> grouped = {};
+    for (final taskWithDetails in tasks) {
+      final categoryId = taskWithDetails.task.categoryId;
+      if (!grouped.containsKey(categoryId)) {
+        grouped[categoryId] = [];
+      }
+      grouped[categoryId]!.add(taskWithDetails);
+    }
+
+    // Sort categories: named categories alphabetically, then uncategorized
+    final sortedEntries = grouped.entries.toList()
+      ..sort((a, b) {
+        if (a.key == null) return 1; // uncategorized at end
+        if (b.key == null) return -1;
+        // Get category names from the first task in each group
+        final aCategory = a.value.first.category;
+        final bCategory = b.value.first.category;
+        return aCategory!.name.compareTo(bCategory!.name);
+      });
+
+    final List<Widget> widgets = [];
+    
+    for (final entry in sortedEntries) {
+      final categoryTasks = entry.value;
+      final category = categoryTasks.first.category; // Get category from first task
+      
+      // Category header
+      widgets.add(
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Row(
+              children: [
+                if (category != null)
+                  CategoryBadge(
+                    category: category,
+                    showName: false,
+                    size: 16,
+                  )
+                else
+                  const Icon(Icons.inbox_outlined, size: 16),
+                const SizedBox(width: 8),
+                Text(
+                  category?.name ?? 'Uncategorized',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${categoryTasks.length}',
+                    style: theme.textTheme.labelSmall,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      
+      // Tasks in this category
+      widgets.add(
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+          sliver: SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final taskWithDetails = categoryTasks[index];
+                return _TaskCard(
+                  taskWithDetails: taskWithDetails,
+                  onStart: () => _toggleTimer(taskWithDetails.task),
+                  onTap: _loadTasks,
+                );
+              },
+              childCount: categoryTasks.length,
+            ),
+          ),
+        ),
+      );
+    }
+    
+    return widgets;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -270,6 +375,16 @@ class _TaskListScreenState extends State<TaskListScreen> {
         title: const Text('TimeTracker'),
         elevation: 0,
         actions: [
+          IconButton(
+            icon: Icon(_groupByCategory ? Icons.view_list : Icons.view_module_outlined),
+            onPressed: () async {
+              setState(() {
+                _groupByCategory = !_groupByCategory;
+              });
+              await _prefsService.setGroupByCategory(_groupByCategory);
+            },
+            tooltip: _groupByCategory ? 'Ungroup' : 'Group by Project/Client',
+          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             onPressed: () {
@@ -333,76 +448,82 @@ class _TaskListScreenState extends State<TaskListScreen> {
             ),
           ],
           
-          // Recent tasks header
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(16, activeTasksWithDetails.isNotEmpty ? 8 : 16, 16, 8),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.history,
-                    size: 20,
-                    color: theme.colorScheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Recent Tasks',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
+          // Recent tasks header (only show if not grouping)
+          if (!_groupByCategory)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(16, activeTasksWithDetails.isNotEmpty ? 8 : 16, 16, 8),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.history,
+                      size: 20,
                       color: theme.colorScheme.primary,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    Text(
+                      'Recent Tasks',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
           
           // Recent tasks list
-          stoppedTasksWithDetails.isEmpty
-              ? SliverFillRemaining(
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.inbox_outlined,
-                          size: 64,
-                          color: theme.colorScheme.onSurfaceVariant.withOpacity(0.5),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No tasks yet',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Tap the + button to create a task',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
+          if (stoppedTasksWithDetails.isEmpty)
+            SliverFillRemaining(
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.inbox_outlined,
+                      size: 64,
+                      color: theme.colorScheme.onSurfaceVariant.withOpacity(0.5),
                     ),
-                  ),
-                )
-              : SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-                  sliver: SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        final taskWithDetails = stoppedTasksWithDetails[index];
-                        return _TaskCard(
-                          taskWithDetails: taskWithDetails,
-                          onStart: () => _toggleTimer(taskWithDetails.task),
-                          onTap: _loadTasks,
-                        );
-                      },
-                      childCount: stoppedTasksWithDetails.length,
+                    const SizedBox(height: 16),
+                    Text(
+                      'No tasks yet',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Tap the + button to create a task',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+            )
+          else if (_groupByCategory)
+            // Show grouped by category
+            ..._buildGroupedTasks(stoppedTasksWithDetails, theme)
+          else
+            // Show ungrouped list
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final taskWithDetails = stoppedTasksWithDetails[index];
+                    return _TaskCard(
+                      taskWithDetails: taskWithDetails,
+                      onStart: () => _toggleTimer(taskWithDetails.task),
+                      onTap: _loadTasks,
+                    );
+                  },
+                  childCount: stoppedTasksWithDetails.length,
+                ),
+              ),
+            ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -429,10 +550,6 @@ class _ActiveTaskCard extends StatelessWidget {
     required this.onStop,
     required this.onTap,
   });
-
-  Color _parseColor(String colorString) {
-    return Color(int.parse(colorString.substring(1), radix: 16) + 0xFF000000);
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -519,34 +636,10 @@ class _ActiveTaskCard extends StatelessWidget {
                                 children: [
                                   // Category badge
                                   if (category != null)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: _parseColor(category.color).withOpacity(0.2),
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                          color: _parseColor(category.color).withOpacity(0.4),
-                                          width: 1,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.folder_outlined,
-                                            size: 12,
-                                            color: _parseColor(category.color).withOpacity(0.9),
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            category.name,
-                                            style: theme.textTheme.labelSmall?.copyWith(
-                                              color: _parseColor(category.color).withOpacity(0.9),
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
+                                    CategoryBadge(
+                                      category: category,
+                                      showName: true,
+                                      size: 12,
                                     ),
 
                                   // Tag chips
