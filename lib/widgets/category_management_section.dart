@@ -35,7 +35,7 @@ class _CategoryManagementSectionState extends State<CategoryManagementSection> {
       setState(() => _isLoading = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading categories: $e')),
+          SnackBar(content: Text('Error loading projects/clients: $e')),
         );
       }
     }
@@ -49,7 +49,7 @@ class _CategoryManagementSectionState extends State<CategoryManagementSection> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('New Category'),
+          title: const Text('New Project/Client'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -57,7 +57,8 @@ class _CategoryManagementSectionState extends State<CategoryManagementSection> {
                 TextField(
                   controller: nameController,
                   decoration: const InputDecoration(
-                    labelText: 'Category Name',
+                    labelText: 'Project/Client Name',
+                    hintText: 'e.g., Acme Corp, Website Project',
                     border: OutlineInputBorder(),
                   ),
                   autofocus: true,
@@ -143,14 +144,14 @@ class _CategoryManagementSectionState extends State<CategoryManagementSection> {
         
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Category created')),
+            const SnackBar(content: Text('Project/Client created')),
           );
           _loadCategories();
         }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error creating category: $e')),
+            SnackBar(content: Text('Error creating project/client: $e')),
           );
         }
       }
@@ -166,7 +167,7 @@ class _CategoryManagementSectionState extends State<CategoryManagementSection> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Edit Category'),
+          title: const Text('Edit Project/Client'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -174,7 +175,8 @@ class _CategoryManagementSectionState extends State<CategoryManagementSection> {
                 TextField(
                   controller: nameController,
                   decoration: const InputDecoration(
-                    labelText: 'Category Name',
+                    labelText: 'Project/Client Name',
+                    hintText: 'e.g., Acme Corp, Website Project',
                     border: OutlineInputBorder(),
                   ),
                   autofocus: true,
@@ -260,14 +262,14 @@ class _CategoryManagementSectionState extends State<CategoryManagementSection> {
         
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Category updated')),
+            const SnackBar(content: Text('Project/Client updated')),
           );
           _loadCategories();
         }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error updating category: $e')),
+            SnackBar(content: Text('Error updating project/client: $e')),
           );
         }
       }
@@ -281,7 +283,7 @@ class _CategoryManagementSectionState extends State<CategoryManagementSection> {
         builder: (context) => AlertDialog(
           title: const Text('Cannot Delete'),
           content: Text(
-            'This category is used by ${categoryWithCount.taskCount} task(s). '
+            'This project/client is used by ${categoryWithCount.taskCount} task(s). '
             'Remove it from those tasks first.',
           ),
           actions: [
@@ -298,7 +300,7 @@ class _CategoryManagementSectionState extends State<CategoryManagementSection> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Category?'),
+        title: const Text('Delete Project/Client?'),
         content: const Text('This action cannot be undone.'),
         actions: [
           TextButton(
@@ -321,14 +323,14 @@ class _CategoryManagementSectionState extends State<CategoryManagementSection> {
         await _categoryRepo.deleteCategory(categoryWithCount.category.id!);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Category deleted')),
+            const SnackBar(content: Text('Project/Client deleted')),
           );
           _loadCategories();
         }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error deleting category: $e')),
+            SnackBar(content: Text('Error deleting project/client: $e')),
           );
         }
       }
@@ -345,8 +347,8 @@ class _CategoryManagementSectionState extends State<CategoryManagementSection> {
   @override
   Widget build(BuildContext context) {
     return ExpansionTile(
-      title: Text('Categories (${_categories.length})'),
-      leading: const Icon(Icons.category),
+      title: Text('Projects/Clients (${_categories.length})'),
+      leading: const Icon(Icons.business),
       children: [
         if (_isLoading)
           const Center(
@@ -360,12 +362,12 @@ class _CategoryManagementSectionState extends State<CategoryManagementSection> {
             padding: const EdgeInsets.all(16.0),
             child: Column(
               children: [
-                const Text('No categories yet'),
+                const Text('No projects/clients yet'),
                 const SizedBox(height: 8),
                 FilledButton.icon(
                   onPressed: _showAddCategoryDialog,
                   icon: const Icon(Icons.add),
-                  label: const Text('Add Category'),
+                  label: const Text('Add Project/Client'),
                 ),
               ],
             ),
@@ -423,7 +425,7 @@ class _CategoryManagementSectionState extends State<CategoryManagementSection> {
                 child: FilledButton.icon(
                   onPressed: _showAddCategoryDialog,
                   icon: const Icon(Icons.add),
-                  label: const Text('Add Category'),
+                  label: const Text('Add Project/Client'),
                 ),
               ),
             ],

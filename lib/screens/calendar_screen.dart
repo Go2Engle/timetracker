@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
+import '../main.dart';
 import '../models/task.dart';
 import '../models/category.dart';
+import '../models/tag.dart';
 import '../repositories/task_repository.dart';
 import '../repositories/category_repository.dart';
 import '../widgets/category_badge.dart';
@@ -34,7 +36,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
-  List<Task> _tasksForSelectedDay = [];
+  List<TaskWithDetails> _tasksForSelectedDay = [];
   Map<DateTime, int> _taskCounts = {};
   bool _isLoading = false;
   
@@ -90,9 +92,28 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final filteredTasks = _selectedCategoryId == null
         ? allTasks
         : allTasks.where((task) => task.categoryId == _selectedCategoryId).toList();
+    
+    // Load details for each task
+    final tasksWithDetails = <TaskWithDetails>[];
+    for (final task in filteredTasks) {
+      Category? category;
+      if (task.categoryId != null) {
+        category = await _categoryRepo.getCategoryById(task.categoryId!);
+      }
+      
+      final tags = task.id != null
+          ? await _taskRepo.getTagsForTask(task.id!)
+          : <Tag>[];
+      
+      tasksWithDetails.add(TaskWithDetails(
+        task: task,
+        category: category,
+        tags: tags,
+      ));
+    }
 
     setState(() {
-      _tasksForSelectedDay = filteredTasks;
+      _tasksForSelectedDay = tasksWithDetails;
       _isLoading = false;
     });
   }
@@ -122,15 +143,15 @@ class _CalendarScreenState extends State<CalendarScreen> {
   int _getTotalElapsedForDay() {
     return _tasksForSelectedDay.fold<int>(
       0,
-      (sum, task) => sum + task.elapsedSeconds,
+      (sum, taskWithDetails) => sum + taskWithDetails.task.elapsedSeconds,
     );
   }
 
-  Future<void> _navigateToTaskDetail(Task task) async {
+  Future<void> _navigateToTaskDetail(TaskWithDetails taskWithDetails) async {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => TaskDetailScreen(taskId: task.id!),
+        builder: (context) => TaskDetailScreen(taskId: taskWithDetails.task.id!),
       ),
     );
     // Refresh the task list when returning from detail screen
@@ -143,29 +164,32 @@ class _CalendarScreenState extends State<CalendarScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Filter by Project/Client'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.clear_all),
-              title: const Text('All tasks'),
-              selected: _selectedCategoryId == null,
-              onTap: () => Navigator.pop(context, -1), // -1 means clear filter
-            ),
-            const Divider(),
-            ..._availableCategories.map((category) {
-              return ListTile(
-                leading: CategoryBadge(
-                  category: category,
-                  showName: false,
-                  size: 24,
-                ),
-                title: Text(category.name),
-                selected: _selectedCategoryId == category.id,
-                onTap: () => Navigator.pop(context, category.id),
-              );
-            }),
-          ],
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.clear_all),
+                title: const Text('All tasks'),
+                selected: _selectedCategoryId == null,
+                onTap: () => Navigator.pop(context, -1), // -1 means clear filter
+              ),
+              const Divider(),
+              ..._availableCategories.map((category) {
+                return ListTile(
+                  leading: CategoryBadge(
+                    category: category,
+                    showName: false,
+                    size: 24,
+                  ),
+                  title: Text(category.name),
+                  selected: _selectedCategoryId == category.id,
+                  onTap: () => Navigator.pop(context, category.id),
+                );
+              }),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -451,7 +475,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 )
               : SliverList(
                   delegate: SliverChildBuilderDelegate((context, index) {
-                    final task = _tasksForSelectedDay[index];
+                    final taskWithDetails = _tasksForSelectedDay[index];
                     return Padding(
                       padding: EdgeInsets.fromLTRB(
                         16,
@@ -460,8 +484,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         index == _tasksForSelectedDay.length - 1 ? 16 : 0,
                       ),
                       child: _TaskHistoryCard(
-                        task: task,
-                        onTap: () => _navigateToTaskDetail(task),
+                        taskWithDetails: taskWithDetails,
+                        onTap: () => _navigateToTaskDetail(taskWithDetails),
                       ),
                     );
                   }, childCount: _tasksForSelectedDay.length),
@@ -473,14 +497,15 @@ class _CalendarScreenState extends State<CalendarScreen> {
 }
 
 class _TaskHistoryCard extends StatelessWidget {
-  final Task task;
+  final TaskWithDetails taskWithDetails;
   final VoidCallback onTap;
 
-  const _TaskHistoryCard({required this.task, required this.onTap});
+  const _TaskHistoryCard({required this.taskWithDetails, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final task = taskWithDetails.task;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -534,6 +559,32 @@ class _TaskHistoryCard extends StatelessWidget {
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        if (taskWithDetails.category != null)
+                          CategoryBadge(
+                            category: taskWithDetails.category!,
+                            showName: true,
+                            size: 12,
+                          ),
+                        ...taskWithDetails.tags.map((tag) => Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.secondaryContainer,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            tag.name,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.onSecondaryContainer,
+                            ),
+                          ),
+                        )),
                       ],
                     ),
                   ],
